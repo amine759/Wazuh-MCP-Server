@@ -1,7 +1,28 @@
-# Wazuh MCP Remote Server - Development Docker Compose v2 Latest
-# Branch: mcp-remote - Development environment for remote MCP server
-# Optimized for development with hot reload and debug features
-# Uses Docker Compose v2 latest format with compose.dev.yml naming convention
+# =============================================================================
+# DEPRECATED: This file is maintained for backward compatibility only.
+# =============================================================================
+# 
+# This standalone compose file has been consolidated into the main
+# docker-compose.yml at the project root using Docker Compose profiles.
+#
+# NEW USAGE (Recommended):
+#   From project root:
+#     docker compose -f ../docker-compose.yml --profile mcp-server-dev up --build -d
+#
+# OLD USAGE (Still works, but not recommended):
+#   From this directory:
+#     docker compose -f compose.dev.yml up --build -d
+#
+# =============================================================================
+# For development deployment, use the main compose file with profile:
+#   cd ../../
+#   docker compose --profile mcp-server-dev up --build -d
+#
+# The main compose file includes:
+#   - Hot reload with volume mounts
+#   - Debug logging
+#   - Development-optimized health checks
+# =============================================================================
 
 name: wazuh-mcp-remote-server-dev
 

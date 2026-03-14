@@ -1,7 +1,29 @@
-# Wazuh MCP Remote Server - Docker Compose v2 Latest
-# MCP-compliant remote server with production-grade configuration
-# Branch: main - Production-ready remote MCP server
-# Uses Docker Compose v2 latest format with compose.yml naming convention
+# =============================================================================
+# DEPRECATED: This file is maintained for backward compatibility only.
+# =============================================================================
+# 
+# This standalone compose file has been consolidated into the main
+# docker-compose.yml at the project root using Docker Compose profiles.
+#
+# NEW USAGE (Recommended):
+#   From project root:
+#     docker compose -f ../docker-compose.yml --profile mcp-server-prod up --build -d
+#
+# OLD USAGE (Still works, but not recommended):
+#   From this directory:
+#     docker compose -f compose.yml up --build -d
+#
+# =============================================================================
+# For production deployment, use the main compose file with profile:
+#   cd ../../
+#   docker compose --profile mcp-server-prod up --build -d
+#
+# The main compose file includes:
+#   - Production-grade security hardening
+#   - Resource limits
+#   - Health checks
+#   - Proper networking
+# =============================================================================
 
 name: wazuh-main-server
 
