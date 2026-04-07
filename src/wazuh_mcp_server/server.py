@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from wazuh_mcp_server import __version__
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
-from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
+from wazuh_mcp_server.api.elastic_client import ElasticSearchNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
 from wazuh_mcp_server.config import WazuhConfig, get_config
 from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, REQUEST_COUNT, setup_monitoring_middleware
@@ -379,13 +379,13 @@ async def lifespan(app: FastAPI):
     logger.info(f"🌐 CORS Origins: {get_config().ALLOWED_ORIGINS}")
     logger.info(f"🔐 Auth Mode: {get_config().AUTH_MODE}")
 
-    # Log Indexer configuration status
+    # Log Elasticsearch configuration status
     cfg = get_config()
-    if cfg.WAZUH_INDEXER_HOST:
-        logger.info(f"📊 Wazuh Indexer: {cfg.WAZUH_INDEXER_HOST}:{cfg.WAZUH_INDEXER_PORT}")
+    if cfg.ELASTICSEARCH_HOST:
+        logger.info(f"📊 Elasticsearch: {cfg.ELASTICSEARCH_HOST}:{cfg.ELASTICSEARCH_PORT}")
     else:
-        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
-        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
+        logger.warning("⚠️  Elasticsearch not configured. Alert and vulnerability tools will not work.")
+        logger.warning("   Set ELASTICSEARCH_HOST, ELASTICSEARCH_USER, ELASTICSEARCH_PASS to enable.")
 
     # Initialize OAuth if enabled
     if cfg.is_oauth:
@@ -491,11 +491,11 @@ wazuh_config = WazuhConfig(
     wazuh_pass=config.WAZUH_PASS,
     wazuh_port=config.WAZUH_PORT,
     verify_ssl=config.WAZUH_VERIFY_SSL,
-    # Wazuh Indexer settings (required for vulnerability tools in Wazuh 4.8.0+)
-    wazuh_indexer_host=config.WAZUH_INDEXER_HOST if config.WAZUH_INDEXER_HOST else None,
-    wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
-    wazuh_indexer_user=config.WAZUH_INDEXER_USER if config.WAZUH_INDEXER_USER else None,
-    wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
+    # Elasticsearch settings (storage backend for alerts and vulnerabilities)
+    elasticsearch_host=config.ELASTICSEARCH_HOST if config.ELASTICSEARCH_HOST else None,
+    elasticsearch_port=config.ELASTICSEARCH_PORT,
+    elasticsearch_user=config.ELASTICSEARCH_USER if config.ELASTICSEARCH_USER else None,
+    elasticsearch_pass=config.ELASTICSEARCH_PASS if config.ELASTICSEARCH_PASS else None,
 )
 
 # Initialize Wazuh client
@@ -1060,7 +1060,7 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
         {
             "uri": "wazuh://vulnerabilities/critical",
             "name": "Critical Vulnerabilities",
-            "description": "Critical vulnerabilities from Wazuh Indexer (requires 4.8.0+)",
+            "description": "Critical vulnerabilities from Elasticsearch",
             "mimeType": "application/json",
         },
     ]
@@ -1315,10 +1315,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "required": ["agent_id"],
             },
         },
-        # Vulnerability Management Tools (3 tools) - Requires Wazuh Indexer (4.8.0+)
+        # Vulnerability Management Tools (3 tools) - Requires Elasticsearch
         {
             "name": "get_wazuh_vulnerabilities",
-            "description": "Retrieve vulnerability information from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
+            "description": "Retrieve vulnerability information from Elasticsearch (requires ELASTICSEARCH_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1340,7 +1340,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_critical_vulnerabilities",
-            "description": "Get critical vulnerabilities from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
+            "description": "Get critical vulnerabilities from Elasticsearch (requires ELASTICSEARCH_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1356,7 +1356,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_vulnerability_summary",
-            "description": "Get vulnerability summary statistics from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
+            "description": "Get vulnerability summary statistics from Elasticsearch (requires ELASTICSEARCH_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {"time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}},
@@ -2208,9 +2208,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         logger.warning(f"Tool validation error in {tool_name}: {e}")
         raise ValueError(str(e))
 
-    except IndexerNotConfiguredError as e:
-        # Provide helpful error for vulnerability tools when indexer is not configured
-        logger.warning(f"Indexer not configured for tool {tool_name}: {e}")
+    except ElasticSearchNotConfiguredError as e:
+        # Provide helpful error for tools when Elasticsearch is not configured
+        logger.warning(f"Elasticsearch not configured for tool {tool_name}: {e}")
         raise ValueError(str(e))
 
     except ConnectionError as e:
@@ -2916,19 +2916,19 @@ async def health_check():
         except Exception:
             wazuh_status = "unhealthy"
 
-        # Test Wazuh Indexer connectivity (if configured)
-        indexer_status = "not_configured"
-        if wazuh_client._indexer_client:
+        # Test Elasticsearch connectivity (if configured)
+        elasticsearch_status = "not_configured"
+        if wazuh_client._elasticsearch_client:
             try:
-                health = await wazuh_client._indexer_client.health_check()
+                health = await wazuh_client._elasticsearch_client.health_check()
                 if health.get("status") in ("green", "yellow"):
-                    indexer_status = "healthy"
+                    elasticsearch_status = "healthy"
                 elif health.get("status") == "red":
-                    indexer_status = "degraded"
+                    elasticsearch_status = "degraded"
                 else:
-                    indexer_status = "unknown"
+                    elasticsearch_status = "unknown"
             except Exception:
-                indexer_status = "unhealthy"
+                elasticsearch_status = "unhealthy"
 
         # Check session count
         all_sessions = await sessions.get_all()
@@ -2949,7 +2949,7 @@ async def health_check():
         # Determine overall status from component health
         if wazuh_status != "healthy":
             overall_status = "degraded"
-        elif isinstance(indexer_status, str) and indexer_status.startswith("unhealthy"):
+        elif isinstance(elasticsearch_status, str) and elasticsearch_status.startswith("unhealthy"):
             overall_status = "degraded"
         else:
             overall_status = "healthy"
@@ -2967,13 +2967,13 @@ async def health_check():
                     "legacy_sse": "enabled",
                 },
                 "authentication": auth_info,
-                "services": {"wazuh_manager": wazuh_status, "wazuh_indexer": indexer_status, "mcp": "healthy"},
+                "services": {"wazuh_manager": wazuh_status, "elasticsearch": elasticsearch_status, "mcp": "healthy"},
                 "vulnerability_tools": {
-                    "available": wazuh_client._indexer_client is not None,
+                    "available": wazuh_client._elasticsearch_client is not None,
                     "note": (
-                        "Vulnerability tools require Wazuh Indexer (4.8.0+). Set WAZUH_INDEXER_HOST to enable."
-                        if not wazuh_client._indexer_client
-                        else "Wazuh Indexer configured"
+                        "Alert and vulnerability tools require Elasticsearch. Set ELASTICSEARCH_HOST to enable."
+                        if not wazuh_client._elasticsearch_client
+                        else "Elasticsearch configured"
                     ),
                 },
                 "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},

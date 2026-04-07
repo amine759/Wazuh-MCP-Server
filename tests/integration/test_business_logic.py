@@ -42,11 +42,11 @@ async def test_wazuh_client_initialization():
 
 
 @pytest.mark.asyncio
-async def test_wazuh_indexer_client():
-    """Test Wazuh Indexer Client initialization."""
-    from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+async def test_elasticsearch_client():
+    """Test Elasticsearch Client initialization."""
+    from wazuh_mcp_server.api.elastic_client import ElasticSearchClient
 
-    client = WazuhIndexerClient(host="localhost", port=9200, username="admin", password="admin", verify_ssl=False)
+    client = ElasticSearchClient(host="localhost", port=9200, username="admin", password="admin", verify_ssl=False)
     assert client is not None
     assert client.host == "localhost"
     assert client.port == 9200
@@ -317,42 +317,42 @@ class TestAuthManagerValidation:
         assert manager.validate_token(token) is None
 
 
-class TestIndexerClientInit:
-    """Tests for WazuhIndexerClient normalization."""
+class TestElasticSearchClientInit:
+    """Tests for ElasticSearchClient normalization."""
 
     def test_host_normalization_strips_https(self):
-        from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+        from wazuh_mcp_server.api.elastic_client import ElasticSearchClient
 
-        client = WazuhIndexerClient(host="https://indexer.example.com")
-        assert client.host == "indexer.example.com"
+        client = ElasticSearchClient(host="https://es.example.com")
+        assert client.host == "es.example.com"
 
     def test_host_normalization_strips_http(self):
-        from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+        from wazuh_mcp_server.api.elastic_client import ElasticSearchClient
 
-        client = WazuhIndexerClient(host="http://indexer.example.com/")
-        assert client.host == "indexer.example.com"
+        client = ElasticSearchClient(host="http://es.example.com/")
+        assert client.host == "es.example.com"
 
     def test_base_url_format(self):
-        from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+        from wazuh_mcp_server.api.elastic_client import ElasticSearchClient
 
-        client = WazuhIndexerClient(host="indexer.local", port=9200)
-        assert client.base_url == "https://indexer.local:9200"
+        client = ElasticSearchClient(host="es.local", port=9200)
+        assert client.base_url == "https://es.local:9200"
 
 
-class TestIndexerNotConfiguredError:
-    """Test IndexerNotConfiguredError message."""
+class TestElasticSearchNotConfiguredError:
+    """Test ElasticSearchNotConfiguredError message."""
 
     def test_default_message(self):
-        from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
+        from wazuh_mcp_server.api.elastic_client import ElasticSearchNotConfiguredError
 
-        err = IndexerNotConfiguredError()
-        assert "Wazuh Indexer not configured" in str(err)
-        assert "WAZUH_INDEXER_HOST" in str(err)
+        err = ElasticSearchNotConfiguredError()
+        assert "Elasticsearch not configured" in str(err)
+        assert "ELASTICSEARCH_HOST" in str(err)
 
     def test_custom_message(self):
-        from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
+        from wazuh_mcp_server.api.elastic_client import ElasticSearchNotConfiguredError
 
-        err = IndexerNotConfiguredError("custom msg")
+        err = ElasticSearchNotConfiguredError("custom msg")
         assert str(err) == "custom msg"
 
 

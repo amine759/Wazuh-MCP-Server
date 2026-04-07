@@ -69,11 +69,11 @@ class WazuhConfig:
     wazuh_port: int = 55000
     verify_ssl: bool = True
 
-    # Indexer settings (optional)
-    wazuh_indexer_host: Optional[str] = None
-    wazuh_indexer_port: int = 9200
-    wazuh_indexer_user: Optional[str] = None
-    wazuh_indexer_pass: Optional[str] = None
+    # Elasticsearch settings (optional)
+    elasticsearch_host: Optional[str] = None
+    elasticsearch_port: int = 9200
+    elasticsearch_user: Optional[str] = None
+    elasticsearch_pass: Optional[str] = None
 
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
@@ -126,8 +126,9 @@ class WazuhConfig:
 
         # Normalize host values (strip protocol if user included it)
         normalized_host = normalize_host(host)
-        indexer_host = os.getenv("WAZUH_INDEXER_HOST")
-        normalized_indexer_host = normalize_host(indexer_host) if indexer_host else None
+        # Don't normalize ES host — ElasticSearchClient uses the protocol prefix
+        # (http:// vs https://) to determine the connection scheme
+        es_host = os.getenv("ELASTICSEARCH_HOST")
 
         # Create config with defaults for most settings
         config = cls(
@@ -136,10 +137,10 @@ class WazuhConfig:
             wazuh_pass=password,
             wazuh_port=port,
             verify_ssl=verify_ssl,
-            wazuh_indexer_host=normalized_indexer_host,
-            wazuh_indexer_port=safe_int_env("WAZUH_INDEXER_PORT", "9200", min_val=1, max_val=65535),
-            wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
-            wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
+            elasticsearch_host=es_host if es_host else None,
+            elasticsearch_port=safe_int_env("ELASTICSEARCH_PORT", "9200", min_val=1, max_val=65535),
+            elasticsearch_user=os.getenv("ELASTICSEARCH_USER"),
+            elasticsearch_pass=os.getenv("ELASTICSEARCH_PASS"),
             mcp_transport=os.getenv("MCP_TRANSPORT", "http"),  # Default to HTTP/SSE
             mcp_host=os.getenv("MCP_HOST", "0.0.0.0"),
             mcp_port=safe_int_env("MCP_PORT", "3000", min_val=1, max_val=65535),
@@ -189,12 +190,12 @@ class ServerConfig:
     WAZUH_VERIFY_SSL: bool = True
     WAZUH_ALLOW_SELF_SIGNED: bool = True
 
-    # Wazuh Indexer settings (Required for Wazuh 4.8.0+ vulnerability tools)
-    WAZUH_INDEXER_HOST: str = ""
-    WAZUH_INDEXER_PORT: int = 9200
-    WAZUH_INDEXER_USER: str = ""
-    WAZUH_INDEXER_PASS: str = ""
-    WAZUH_INDEXER_VERIFY_SSL: bool = True
+    # Elasticsearch settings (storage backend for alerts and vulnerabilities)
+    ELASTICSEARCH_HOST: str = ""
+    ELASTICSEARCH_PORT: int = 9200
+    ELASTICSEARCH_USER: str = ""
+    ELASTICSEARCH_PASS: str = ""
+    ELASTICSEARCH_VERIFY_SSL: bool = True
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -245,12 +246,12 @@ class ServerConfig:
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
             WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
-            # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
-            WAZUH_INDEXER_HOST=normalize_host(os.getenv("WAZUH_INDEXER_HOST", "")),
-            WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
-            WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
-            WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
-            WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
+            # Elasticsearch settings (storage backend for alerts and vulnerabilities)
+            ELASTICSEARCH_HOST=os.getenv("ELASTICSEARCH_HOST", ""),
+            ELASTICSEARCH_PORT=validate_port(os.getenv("ELASTICSEARCH_PORT", "9200"), "ELASTICSEARCH_PORT"),
+            ELASTICSEARCH_USER=os.getenv("ELASTICSEARCH_USER", ""),
+            ELASTICSEARCH_PASS=os.getenv("ELASTICSEARCH_PASS", ""),
+            ELASTICSEARCH_VERIFY_SSL=os.getenv("ELASTICSEARCH_VERIFY_SSL", "true").lower() == "true",
             LOG_LEVEL=log_level,
         )
 

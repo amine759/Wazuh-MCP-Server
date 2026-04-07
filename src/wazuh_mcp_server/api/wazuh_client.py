@@ -10,13 +10,13 @@ from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
-from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError, WazuhIndexerClient
+from wazuh_mcp_server.api.elastic_client import ElasticSearchNotConfiguredError, ElasticSearchClient
 from wazuh_mcp_server.config import WazuhConfig
 from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, RetryConfig
 
 logger = logging.getLogger(__name__)
 
-# Time range to hours mapping for indexer-based queries
+# Time range to hours mapping for Elasticsearch-based queries
 _TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "24h": 24, "7d": 168, "30d": 720}
 
 
@@ -68,22 +68,22 @@ class WazuhClient:
         )
         self._circuit_breaker = CircuitBreaker(circuit_config)
 
-        # Initialize Wazuh Indexer client if configured (required for Wazuh 4.8.0+)
-        self._indexer_client: Optional[WazuhIndexerClient] = None
-        if config.wazuh_indexer_host:
-            self._indexer_client = WazuhIndexerClient(
-                host=config.wazuh_indexer_host,
-                port=config.wazuh_indexer_port,
-                username=config.wazuh_indexer_user,
-                password=config.wazuh_indexer_pass,
+        # Initialize Elasticsearch client if configured
+        self._elasticsearch_client: Optional[ElasticSearchClient] = None
+        if config.elasticsearch_host:
+            self._elasticsearch_client = ElasticSearchClient(
+                host=config.elasticsearch_host,
+                port=config.elasticsearch_port,
+                username=config.elasticsearch_user,
+                password=config.elasticsearch_pass,
                 verify_ssl=config.verify_ssl,
                 timeout=config.request_timeout_seconds,
             )
-            logger.info(f"WazuhIndexerClient configured for {config.wazuh_indexer_host}:{config.wazuh_indexer_port}")
+            logger.info(f"ElasticSearchClient configured for {config.elasticsearch_host}:{config.elasticsearch_port}")
         else:
             logger.warning(
-                "Wazuh Indexer not configured. Vulnerability tools will not work with Wazuh 4.8.0+. "
-                "Set WAZUH_INDEXER_HOST to enable vulnerability queries."
+                "Elasticsearch not configured. Alert and vulnerability tools will not work. "
+                "Set ELASTICSEARCH_HOST to enable queries."
             )
 
         logger.info("WazuhClient initialized with circuit breaker and retry logic")
@@ -93,13 +93,13 @@ class WazuhClient:
         self.client = httpx.AsyncClient(verify=self.config.verify_ssl, timeout=self.config.request_timeout_seconds)
         await self._authenticate()
 
-        # Initialize indexer client if configured
-        if self._indexer_client:
+        # Initialize Elasticsearch client if configured
+        if self._elasticsearch_client:
             try:
-                await self._indexer_client.initialize()
-                logger.info("Wazuh Indexer client initialized successfully")
+                await self._elasticsearch_client.initialize()
+                logger.info("Elasticsearch client initialized successfully")
             except Exception as e:
-                logger.warning(f"Wazuh Indexer initialization failed: {e}")
+                logger.warning(f"Elasticsearch initialization failed: {e}")
 
     async def _authenticate(self):
         """Authenticate with Wazuh API."""
@@ -135,26 +135,26 @@ class WazuhClient:
 
     async def get_alerts(self, **params) -> Dict[str, Any]:
         """
-        Get alerts from the Wazuh Indexer (wazuh-alerts-* index).
+        Get alerts from Elasticsearch (wazuh-alerts-* index).
 
-        Alerts are stored in the Wazuh Indexer, not the Manager API.
+        Alerts are stored in Elasticsearch, not the Manager API.
         The Manager API does not have a /alerts endpoint.
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError(
-                "Wazuh Indexer not configured. "
-                "Alerts are stored in the Wazuh Indexer and require WAZUH_INDEXER_HOST to be set.\n\n"
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError(
+                "Elasticsearch not configured. "
+                "Alerts are stored in Elasticsearch and require ELASTICSEARCH_HOST to be set.\n\n"
                 "Please set the following environment variables:\n"
-                "  WAZUH_INDEXER_HOST=<indexer_hostname>\n"
-                "  WAZUH_INDEXER_USER=<indexer_username>\n"
-                "  WAZUH_INDEXER_PASS=<indexer_password>\n"
-                "  WAZUH_INDEXER_PORT=9200 (optional, default: 9200)"
+                "  ELASTICSEARCH_HOST=<elasticsearch_hostname>\n"
+                "  ELASTICSEARCH_USER=<elasticsearch_username>\n"
+                "  ELASTICSEARCH_PASS=<elasticsearch_password>\n"
+                "  ELASTICSEARCH_PORT=9200 (optional, default: 9200)"
             )
 
-        return await self._indexer_client.get_alerts(
+        return await self._elasticsearch_client.get_alerts(
             limit=params.get("limit", 100),
             rule_id=params.get("rule_id"),
             level=params.get("level"),
@@ -179,11 +179,11 @@ class WazuhClient:
 
     async def get_vulnerabilities(self, **params) -> Dict[str, Any]:
         """
-        Get vulnerabilities from Wazuh Indexer (4.8.0+ required).
+        Get vulnerabilities from Elasticsearch (4.8.0+ required).
 
         Note: The /vulnerability API endpoint was deprecated in Wazuh 4.7.0
         and removed in 4.8.0. Vulnerability data must be queried from the
-        Wazuh Indexer using the wazuh-states-vulnerabilities-* index.
+        Elasticsearch using the wazuh-states-vulnerabilities-* index.
 
         Args:
             agent_id: Filter by agent ID
@@ -191,19 +191,19 @@ class WazuhClient:
             limit: Maximum number of results (default: 100)
 
         Returns:
-            Vulnerability data from the indexer
+            Vulnerability data from Elasticsearch
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
 
         agent_id = params.get("agent_id")
         severity = params.get("severity")
         limit = params.get("limit", 100)
 
-        return await self._indexer_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
+        return await self._elasticsearch_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
 
     async def get_cluster_status(self) -> Dict[str, Any]:
         """Get cluster status."""
@@ -304,9 +304,9 @@ class WazuhClient:
 
     async def get_cti_data(self, cve_id: str) -> Dict[str, Any]:
         """
-        Get Cyber Threat Intelligence data for CVE (4.8.0+ via Indexer).
+        Get Cyber Threat Intelligence data for CVE (4.8.0+ via Elasticsearch).
 
-        Note: CTI data is now stored in the Wazuh Indexer.
+        Note: CTI data is now stored in the Elasticsearch.
 
         Args:
             cve_id: CVE ID to look up (e.g., "CVE-2021-44228")
@@ -315,18 +315,18 @@ class WazuhClient:
             Vulnerability data for the specific CVE
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
 
-        return await self._indexer_client.get_vulnerabilities(cve_id=cve_id, limit=100)
+        return await self._elasticsearch_client.get_vulnerabilities(cve_id=cve_id, limit=100)
 
     async def get_vulnerability_details(self, vuln_id: str, **params) -> Dict[str, Any]:
         """
-        Get detailed vulnerability information (4.8.0+ via Indexer).
+        Get detailed vulnerability information (4.8.0+ via Elasticsearch).
 
-        Note: Vulnerability details are now stored in the Wazuh Indexer.
+        Note: Vulnerability details are now stored in the Elasticsearch.
 
         Args:
             vuln_id: Vulnerability/CVE ID
@@ -335,12 +335,12 @@ class WazuhClient:
             Detailed vulnerability information
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
 
-        return await self._indexer_client.get_vulnerabilities(cve_id=vuln_id, limit=1)
+        return await self._elasticsearch_client.get_vulnerabilities(cve_id=vuln_id, limit=1)
 
     async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:
         """Get agent component statistics."""
@@ -460,11 +460,11 @@ class WazuhClient:
         return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
     async def get_alert_summary(self, time_range: str, group_by: str) -> Dict[str, Any]:
-        """Get alert summary — aggregated from Wazuh Indexer."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        """Get alert summary — aggregated from Elasticsearch."""
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        result = await self._elasticsearch_client.get_alerts(limit=1000, timestamp_start=start)
         alerts = result.get("data", {}).get("affected_items", [])
         groups: Dict[str, int] = {}
         for alert in alerts:
@@ -483,11 +483,11 @@ class WazuhClient:
         }
 
     async def analyze_alert_patterns(self, time_range: str, min_frequency: int) -> Dict[str, Any]:
-        """Analyze alert patterns — aggregated from Wazuh Indexer."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        """Analyze alert patterns — aggregated from Elasticsearch."""
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        result = await self._elasticsearch_client.get_alerts(limit=1000, timestamp_start=start)
         alerts = result.get("data", {}).get("affected_items", [])
         rule_counts: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
@@ -512,13 +512,13 @@ class WazuhClient:
         }
 
     async def search_security_events(self, query: str, time_range: str, limit: int) -> Dict[str, Any]:
-        """Search security events via the Wazuh Indexer with query filtering."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        """Search security events via the Elasticsearch with query filtering."""
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        # Fetch a larger batch from the indexer, then filter by query
+        # Fetch a larger batch from Elasticsearch, then filter by query
         fetch_limit = min(limit * 5, 2000)
-        result = await self._indexer_client.get_alerts(limit=fetch_limit, timestamp_start=start)
+        result = await self._elasticsearch_client.get_alerts(limit=fetch_limit, timestamp_start=start)
         if query:
             alerts = result.get("data", {}).get("affected_items", [])
             query_lower = query.lower()
@@ -594,25 +594,25 @@ class WazuhClient:
 
     async def get_critical_vulnerabilities(self, limit: int) -> Dict[str, Any]:
         """
-        Get critical vulnerabilities from Wazuh Indexer (4.8.0+ required).
+        Get critical vulnerabilities from Elasticsearch (4.8.0+ required).
 
         Args:
             limit: Maximum number of results
 
         Returns:
-            Critical vulnerability data from the indexer
+            Critical vulnerability data from Elasticsearch
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
 
-        return await self._indexer_client.get_critical_vulnerabilities(limit=limit)
+        return await self._elasticsearch_client.get_critical_vulnerabilities(limit=limit)
 
     async def get_vulnerability_summary(self, time_range: str) -> Dict[str, Any]:
         """
-        Get vulnerability summary statistics from Wazuh Indexer (4.8.0+ required).
+        Get vulnerability summary statistics from Elasticsearch (4.8.0+ required).
 
         Args:
             time_range: Time range for the summary (currently not used, returns all current vulnerabilities)
@@ -621,18 +621,18 @@ class WazuhClient:
             Vulnerability summary with counts by severity
 
         Raises:
-            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+            ElasticSearchNotConfiguredError: If Elasticsearch is not configured
         """
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
 
-        return await self._indexer_client.get_vulnerability_summary()
+        return await self._elasticsearch_client.get_vulnerability_summary()
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Analyze security threat by searching alerts for the indicator."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=100)
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
+        result = await self._elasticsearch_client.get_alerts(limit=100)
         alerts = result.get("data", {}).get("affected_items", [])
         indicator_lower = indicator.lower()
         matches = [a for a in alerts if _dict_contains_text(a, indicator_lower)]
@@ -647,9 +647,9 @@ class WazuhClient:
 
     async def check_ioc_reputation(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Check IoC reputation by searching alert history."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=500)
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
+        result = await self._elasticsearch_client.get_alerts(limit=500)
         alerts = result.get("data", {}).get("affected_items", [])
         occurrences = 0
         max_level = 0
@@ -682,9 +682,9 @@ class WazuhClient:
         disconnected = [a for a in items if a.get("status") != "active"]
         if disconnected:
             risk_factors.append({"factor": "disconnected_agents", "count": len(disconnected), "severity": "high"})
-        if self._indexer_client:
+        if self._elasticsearch_client:
             try:
-                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                vuln_summary = await self._elasticsearch_client.get_vulnerability_summary()
                 critical = vuln_summary.get("data", {}).get("critical", 0)
                 if critical > 0:
                     risk_factors.append(
@@ -707,11 +707,11 @@ class WazuhClient:
         }
 
     async def get_top_security_threats(self, limit: int, time_range: str) -> Dict[str, Any]:
-        """Get top threats by alert rule frequency from Indexer."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
+        """Get top threats by alert rule frequency from Elasticsearch."""
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        result = await self._elasticsearch_client.get_alerts(limit=1000, timestamp_start=start)
         alerts = result.get("data", {}).get("affected_items", [])
         rule_counts: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
@@ -748,9 +748,9 @@ class WazuhClient:
             report["sections"]["manager"] = info.get("data", {})
         except Exception as e:
             report["sections"]["manager"] = {"error": str(e)}
-        if self._indexer_client:
+        if self._elasticsearch_client:
             try:
-                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                vuln_summary = await self._elasticsearch_client.get_vulnerability_summary()
                 report["sections"]["vulnerabilities"] = vuln_summary.get("data", {})
             except Exception as e:
                 report["sections"]["vulnerabilities"] = {"error": str(e)}
@@ -948,9 +948,9 @@ class WazuhClient:
 
     async def check_blocked_ip(self, ip_address: str, agent_id: str = None) -> Dict[str, Any]:
         """Check if IP is blocked by searching active response alerts."""
-        if not self._indexer_client:
-            raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=50)
+        if not self._elasticsearch_client:
+            raise ElasticSearchNotConfiguredError()
+        result = await self._elasticsearch_client.get_alerts(limit=50)
         alerts = result.get("data", {}).get("affected_items", [])
         matches = [a for a in alerts if _dict_contains_text(a, ip_address) and _dict_contains_text(a, "firewall-drop")]
         return {"data": {"ip_address": ip_address, "blocked": len(matches) > 0, "matching_alerts": len(matches)}}
@@ -963,11 +963,11 @@ class WazuhClient:
             raise ValueError(f"Agent {agent_id} not found")
         agent = agents[0]
         status = agent.get("status")
-        # Check alert history for isolation commands if indexer is available
+        # Check alert history for isolation commands if Elasticsearch is available
         isolation_confirmed = False
-        if self._indexer_client and status == "disconnected":
+        if self._elasticsearch_client and status == "disconnected":
             try:
-                alerts = await self._indexer_client.get_alerts(limit=20)
+                alerts = await self._elasticsearch_client.get_alerts(limit=20)
                 items = alerts.get("data", {}).get("affected_items", [])
                 isolation_confirmed = any(
                     _dict_contains_text(a, "host-isolation") and _dict_contains_text(a, agent_id) for a in items
@@ -998,9 +998,9 @@ class WazuhClient:
         # Search for disable-account active response alerts
         disable_evidence = False
         enable_evidence = False
-        if self._indexer_client:
+        if self._elasticsearch_client:
             try:
-                alerts = await self._indexer_client.get_alerts(limit=50)
+                alerts = await self._elasticsearch_client.get_alerts(limit=50)
                 items = alerts.get("data", {}).get("affected_items", [])
                 for alert in items:
                     if _dict_contains_text(alert, username) and _dict_contains_text(alert, agent_id):
@@ -1072,8 +1072,8 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     async def close(self):
-        """Close the HTTP client and indexer client."""
+        """Close the HTTP client and Elasticsearch client."""
         if self.client:
             await self.client.aclose()
-        if self._indexer_client:
-            await self._indexer_client.close()
+        if self._elasticsearch_client:
+            await self._elasticsearch_client.close()
